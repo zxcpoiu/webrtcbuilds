@@ -89,14 +89,22 @@ function checkout() {
 
   pushd $outdir
   if [ ! -d src ]; then
-    case $platform in
-    android)
-      fetch --nohooks webrtc_android
-      ;;
-    *)
-      fetch --nohooks webrtc
-      ;;
-    esac
+    if [ -n ${USE_PICKLE:-} ]; then
+      # pickle created via: GZIP=-9 tar zcvf pickle.tar.gz . && split -d -b 2048m pickle.tar.gz pickle.tar.gz
+      curl -L https://dl.dropboxusercontent.com/u/14570408/pickle.tar.gz | tar xz
+      #curl -L -O --silent https://github.com/vsimon/webrtcbuilds-builder/releases/download/pickle/pickle.tar.gz.0[0-5] && \
+      #cat pickle.tar.gz.* | tar xzpf -
+      #rm pickle.tar.gz.*
+    else
+      case $platform in
+      android)
+        fetch --nohooks webrtc_android
+        ;;
+      *)
+        fetch --nohooks webrtc
+        ;;
+      esac
+    fi
   fi
   # check out the specific revision after fetch
   gclient sync --force --revision $revision
@@ -190,6 +198,9 @@ function compile() {
     configs="Debug Release"
     for cfg in $configs; do
       gclient runhooks
+      ls -latr
+      ls -latr src
+      ls -latr src/out
       ninja -C src/out/$cfg
       # combine all the static libraries into one called webrtc_full
       pushd src/out/$cfg

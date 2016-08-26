@@ -3,6 +3,7 @@
 set -o errexit
 set -o nounset
 set -o pipefail
+set -x
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/util.sh
@@ -60,6 +61,6 @@ REVISION=${REVISION:-$(git ls-remote $REPO_URL HEAD | cut -f1)} || \
 echo "Building revision: $REVISION"
 
 checkout $PLATFORM $OUTDIR $REVISION
-patch $PLATFORM $OUTDIR
-compile $PLATFORM $OUTDIR
-package $PLATFORM $OUTDIR $REVISION $DIR/resource
+#patch $PLATFORM $OUTDIR
+#compile $PLATFORM $OUTDIR
+#package $PLATFORM $OUTDIR $REVISION $DIR/resource
