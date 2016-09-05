@@ -8,7 +8,7 @@ function set-platform() {
   darwin*)  PLATFORM=${PLATFORM:-osx} ;;
   linux*)   PLATFORM=${PLATFORM:-linux64} ;;
   win32*)   PLATFORM=${PLATFORM:-windows} ;;
-  msys*)   PLATFORM=${PLATFORM:-windows} ;;
+  msys*)    PLATFORM=${PLATFORM:-windows} ;;
   *)        echo "Building on unsupported OS: $OSTYPE"; exit 1; ;;
   esac
 }
@@ -33,10 +33,14 @@ function check::depot-tools() {
     git clone -q $depot_tools_url $depot_tools_dir
     if [ $platform = 'windows' ]; then
       # run gclient.bat to get python
-      pushd $depot_tools_dir
+      pushd $depot_tools_dir >/dev/null
       ./gclient.bat
-      popd
+      popd >/dev/null
     fi
+  else
+    pushd $depot_tools_dir >/dev/null
+      git reset --hard
+    popd >/dev/null
   fi
 }
 
@@ -90,7 +94,7 @@ function checkout() {
   local outdir="$2"
   local revision="$3"
 
-  pushd $outdir
+  pushd $outdir >/dev/null
   if [ ! -d src ]; then
     case $platform in
     android)
@@ -103,7 +107,7 @@ function checkout() {
   fi
   # check out the specific revision after fetch
   gclient sync --force --revision $revision
-  popd
+  popd >/dev/null
 }
 
 # Patches a checkout for building static standalone libs
@@ -113,7 +117,7 @@ function patch() {
   local platform="$1"
   local outdir="$2"
 
-  pushd $outdir
+  pushd $outdir >/dev/null
   case $platform in
   windows)
     # patch for directx not found
@@ -128,24 +132,25 @@ function patch() {
     ;;
   android) ;;
   *)
-    # sed
-    if [ $platform = 'osx' ]; then
-      SED='gsed'
-    else
-      SED='sed'
-    fi
-    # patch all platforms to build standalone libs
-    find src/webrtc src/talk src/chromium/src/third_party \( -name *.gyp -o  -name *.gypi \) -not -path *libyuv* -exec $SED -i "s|\('type': 'static_library',\)|\1 'standalone_static_library': 1,|" '{}' ';'
-    # for icu only; icu_use_data_file_flag is 1 on linux
-    find src/chromium/src/third_party/icu/icu.gyp \( -name *.gyp -o  -name *.gypi \) -exec $SED -i "s|\('type': 'none',\)|\1 'standalone_static_library': 0,|" '{}' ';'
-    # enable rtti for osx and linux
-    $SED -i "s|'GCC_ENABLE_CPP_RTTI': 'NO'|'GCC_ENABLE_CPP_RTTI': 'YES'|" src/chromium/src/build/common.gypi
-    $SED -i "s|^          '-fno-rtti'|          '-frtti'|" src/chromium/src/build/common.gypi
-    # don't make thin archives
-    $SED -i "s|, 'alink_thin'|, 'alink'|" src/tools/gyp/pylib/gyp/generator/ninja.py
+    echo Nothing to do
     ;;
   esac
-  popd
+  popd >/dev/null
+}
+
+# This function combines build artifact objects into one library named by
+# 'outputlib'.
+# $1: The directory containing .ninja_deps and build artifacts.
+# $2: The output library name.
+function combine-objs() {
+  local builddir="$1"
+  local outputlib="$2"
+
+  # Produce an ordered object list, ninja_deps is a binary-file, so filter
+  # for non-sensical chars. Outputing a file is also useful for debugging.
+  strings $builddir/.ninja_deps | tr -d '%' | grep \\.o$ > $builddir/objlist.txt
+  # Combine all objects into one static library
+  cat $builddir/objlist.txt | xargs ar crs $builddir/$outputlib
 }
 
 # This compiles the library.
@@ -154,12 +159,9 @@ function patch() {
 function compile() {
   local platform="$1"
   local outdir="$2"
+  local target_os="" # TODO: one-day support cross-compiling via options
 
-  pushd $outdir
-  # start with no tests
-  #GYP_DEFINES='build_with_chromium=0 include_tests=0 host_clang=0 disable_glibcxx_debug=1 linux_use_debug_fission=0'
-  GYP_DEFINES='build_with_chromium=0 include_tests=0'
-
+  pushd $outdir/src >/dev/null
   case $platform in
   windows)
     # do the build
@@ -183,27 +185,23 @@ function compile() {
     "$VS120COMNTOOLS../../VC/bin/lib" /OUT:src/out/Release_x64/webrtc_full.lib src/out/Release_x64/*.lib
     ;;
   *)
-    if [ $platform = 'android' ]; then
-      GYP_DEFINES="OS=android $GYP_DEFINES"
-      . src/build/android/envsetup.sh
-    elif [ $platform = 'osx' ]; then
-      GYP_DEFINES="target_arch=x64 $GYP_DEFINES"
-    fi
-    # do the build
-    configs="Debug Release"
-    for cfg in $configs; do
-      python src/webrtc/build/gyp_webrtc.py
-      ninja -C src/out/$cfg
-      # combine all the static libraries into one called webrtc_full
-      pushd src/out/$cfg
-      find . -name '*.a' -exec ar -x '{}' ';'
-      ar -crs libwebrtc_full.a *.o
-      rm *.o
-      popd
-    done
+    # Debug builds are component builds (shared libraries) by default unless
+    # is_component_build=false is passed to gn gen --args. Release builds are
+    # static by default.
+    gn gen out/Debug --args="target_os=\"$target_os\" is_component_build=false"
+    pushd out/Debug >/dev/null
+      ninja -C .
+      combine-objs . libwebrtc_full.a
+    popd >/dev/null
+
+    gn gen out/Release --args="target_os=\"$target_os\" is_component_build=false is_debug=false"
+    pushd out/Release >/dev/null
+      ninja -C .
+      combine-objs . libwebrtc_full.a
+    popd >/dev/null
     ;;
   esac
-  popd
+  popd >/dev/null
 }
 
 # This packages a compiled build into a zip file in the output directory.
@@ -218,7 +216,7 @@ function package() {
   local resourcedir="$4"
 
   # go into the webrtc repo to be able to get the revision number from git log
-  pushd $outdir
+  pushd $outdir >/dev/null
   if [ $platform = 'Darwin' ]; then
     SED='gsed'
     CP='gcp'
@@ -226,7 +224,7 @@ function package() {
     SED='sed'
     CP='cp'
   fi
-  pushd src
+  pushd src >/dev/null
   local revision_number=$(git log -1 | tail -1 | $SED -ne 's|.*@\W*\([0-9]\+\).*$|\1|p')
   [[ -n $revision_number ]] || \
     { echo "Could not get revision number for packaging" && exit 1; }
@@ -236,14 +234,13 @@ function package() {
   # create directory structure
   mkdir -p $outdir/$label/include $outdir/$label/lib
   # find and copy header files
-  find webrtc talk chromium/src/third_party/jsoncpp -name *.h \
-    -exec $CP --parents '{}' $outdir/$label/include ';'
+  find webrtc -name *.h -exec $CP --parents '{}' $outdir/$label/include ';'
   # find and copy libraries
-  pushd out
+  pushd out >/dev/null
   find . -maxdepth 3 \( -name *.so -o -name *webrtc_full* -o -name *.jar \) \
     -exec $CP --parents '{}' $outdir/$label/lib ';'
-  popd
-  popd
+  popd >/dev/null
+  popd >/dev/null
 
   # for linux64, add pkgconfig files
   if [ $platform = 'linux64' ]; then
@@ -254,6 +251,10 @@ function package() {
         $label/lib/$cfg/pkgconfig/libwebrtc_full.pc
     done
   fi
+
+  # remove first for cleaner builds
+  rm -f $label.zip
+
   # zip up the package
   if [ $platform = 'windows' ]; then
     $DEPOT_TOOLS/win_toolchain/7z/7z.exe a -tzip $label.zip $label
@@ -262,5 +263,5 @@ function package() {
   fi
   # archive revision_number
   echo $revision_number > revision_number
-  popd
+  popd >/dev/null
 }
