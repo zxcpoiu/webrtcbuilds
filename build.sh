@@ -42,7 +42,7 @@ done
 OUTDIR=${OUTDIR:-out}
 BRANCH=${BRANCH:-}
 DEBUG=${DEBUG:-0}
-PROJECT_NAME=webrtcbuilds
+PROJECT_NAME='webrtc'
 REPO_URL="https://chromium.googlesource.com/external/webrtc"
 DEPOT_TOOLS_URL="https://chromium.googlesource.com/chromium/tools/depot_tools.git"
 DEPOT_TOOLS_DIR=$DIR/depot_tools
@@ -67,21 +67,10 @@ check::webrtcbuilds::deps $PLATFORM
 echo Checking depot-tools
 check::depot-tools $PLATFORM $DEPOT_TOOLS_URL $DEPOT_TOOLS_DIR
 
-if [ ! -z $BRANCH ]; then
-  REVISION=$(git ls-remote $REPO_URL --heads $BRANCH | head --lines 1 | cut --fields 1) || \
-    { echo "Cound not get branch revision" && exit 1; }
-   echo "Building branch: $BRANCH"
-else
-  REVISION=${REVISION:-$(latest-rev $REPO_URL)} || \
-    { echo "Could not get latest revision" && exit 1; }
-fi
+REVISION='M55'
 echo "Building revision: $REVISION"
-REVISION_NUMBER=$(revision-number $REPO_URL $REVISION) || \
-  { echo "Could not get revision number" && exit 1; }
+REVISION_NUMBER="14500"
 echo "Associated revision number: $REVISION_NUMBER"
-
-echo "Checking out WebRTC revision (this will take awhile): $REVISION"
-checkout "$TARGET_OS" $OUTDIR $REVISION
 
 echo Checking WebRTC dependencies
 check::webrtc::deps $PLATFORM $OUTDIR "$TARGET_OS"

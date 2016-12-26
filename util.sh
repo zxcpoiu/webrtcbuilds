@@ -234,6 +234,7 @@ function compile() {
   local target_args="target_os=\"$target_os\" target_cpu=\"$target_cpu\""
 
   pushd $outdir/src >/dev/null
+  GYP_DEFINES='build_with_chromium=0 include_tests=0 host_os=linux libjingle_java=1 libjingle_objc=0 build_with_libjingle=1 enable_tracing=1 enable_android_opensl=0'#Custom
   case $platform in
   win)
   # 32-bit build
@@ -255,22 +256,6 @@ function compile() {
     # Debug builds are component builds (shared libraries) by default unless
     # is_component_build=false is passed to gn gen --args. Release builds are
     # static by default.
-    gn gen out/Debug --args="$common_args $target_args"
-    pushd out/Debug >/dev/null
-      ninja -C .
-
-      rm -f libwebrtc_full.a
-      # Produce an ordered objects list by parsing .ninja_deps for strings
-      # matching .o files.
-      local objlist=$(strings .ninja_deps | grep -o '.*\.o')
-      combine-objs "$objlist" libwebrtc_full.a
-
-      # various intrinsics aren't included by default in .ninja_deps
-      local extras=$(find \
-        ./obj/third_party/libvpx/libvpx_* \
-        ./obj/third_party/libjpeg_turbo/simd_asm -name *.o)
-      combine-objs "$extras" libwebrtc_full.a
-    popd >/dev/null
 
     gn gen out/Release --args="is_debug=false $common_args $target_args"
     pushd out/Release >/dev/null
@@ -324,7 +309,7 @@ function package() {
 
   # for linux, add pkgconfig files
   if [ $platform = 'linux' ]; then
-    configs="Debug Release"
+    configs="Release"
     for cfg in $configs; do
       mkdir -p $label/lib/$cfg/pkgconfig
       CONFIG=$cfg envsubst '$CONFIG' < $resourcedir/pkgconfig/libwebrtc_full.pc.in > \
